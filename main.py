@@ -53,6 +53,13 @@ def setupcams(init_params : sl.InitParameters):
         cameras.append(cam)
     return cameras
 
+class Image:
+    def __init__(self):
+        self.image = sl.Mat()
+        self.depth = sl.Mat()
+        self.point_cloud = sl.Mat()
+
+
 class ISOBJ:
     def __init__(self, zed : sl.Camera, confidence: float, type : sl.OBJECT_CLASS):
         self.zed = zed
@@ -89,6 +96,32 @@ class ISOBJ:
         return False
 
 
+def getdepth(zed : sl.Camera, x : int, y : int):
+    image = Image()
+
+    runtime_para = sl.RuntimeParameters()
+    boolean = True
+    while boolean:
+        if zed.grab(runtime_para) == sl.ERROR_CODE.SUCCESS:
+            zed.retrieve_image(image.image)
+            zed.retrieve_measure(image.depth, sl.MEASURE.DEPTH)
+            zed.retrieve_measure(image.point_cloud, sl.MEASURE.XYZRGBA)
+            err, depth_value = image.depth.get_value(x, y)
+            if err != sl.ERROR_CODE.SUCCESS:
+                print("no")
+            # print(depth_value)
+            if math.isnan(depth_value):
+                # print("None")
+                boolean = True
+            else:
+                boolean = False
+                print(depth_value)
+
+            # boolean = False
+    return depth_value
+
+
+
 
 def main():
     print("Starting...")
@@ -101,6 +134,9 @@ def main():
     proc = subprocess.run(cmd, input=password + "\n", text=True, check=True)
     time.sleep(10)
     print("Can is up")
+
+    depth = 0
+
 
     try:
         isperson = ISOBJ(cameras[0], 8, sl.OBJECT_CLASS.PERSON)
@@ -115,7 +151,20 @@ def main():
         msg = can.Message(arbitration_id=0x18ff1023, data=[0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88], is_extended_id=True)
         can0bool = 0
         can1bool = 0
+
+
         while True:
+            try:
+                depth = getdepth(cameras[0], 480, 300)
+            except:
+                depth = 0
+            if depth > 0:
+                message = can.Message(arbitration_id=0x18ff1123, data=round(depth).to_bytes(8, byteorder="little"),
+                                      is_extended_id=True)
+            else:
+                message = can.Message(arbitration_id=0x18ff1123, data=0, is_extended_id=True)
+            # print(depth)
+
 
             if(isperson.query()):
                 msg = can.Message(arbitration_id=0x18ff1023, data=[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], is_extended_id=True)
@@ -124,19 +173,21 @@ def main():
                 msg = can.Message(arbitration_id=0x18ff1023, data=[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], is_extended_id=True)
                 print("False")
             time.sleep(0.5)
-            if can0bool <3:
+            if can0bool <10:
 
                 try:
                     CAN0.send(msg)
+                    CAN0.send(message)
                     print("Out0")
                     can0bool = 0
                 except can.CanError:
                     can0bool = can0bool + 1
                     print("CAN0 error")
-            if can1bool <3:
+            if can1bool <10:
 
                 try:
                     CAN1.send(msg)
+                    CAN1.send(message)
                     can1bool = 0
                     print("Out1")
                 except can.CanError:
